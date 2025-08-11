@@ -4,9 +4,9 @@ use secrecy::SecretString;
 use std::net::IpAddr;
 use url::Url;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub max_wait_time: usize,
+    pub max_wait_time: u64,
     pub max_batch_size: usize,
     pub inference_service_url: Url,
     pub inference_service_key: Option<SecretString>,

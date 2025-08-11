@@ -11,12 +11,38 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router, debug_handler};
 pub use config::Config;
+use secrecy::SecretString;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::{mpsc, oneshot};
+use url::Url;
 
 use crate::error::Error;
+
+#[allow(unused)]
+struct InferenceServiceWorker<T> {
+    chan: Receiver<T>,
+    http_client: reqwest::Client,
+    max_wait_time: Duration,
+    max_batch_size: usize,
+    inference_service_url: Url,
+    inference_service_key: Option<SecretString>,
+}
+
+impl<T> InferenceServiceWorker<T> {
+    async fn run(&mut self) {
+        info!(
+            inference_service_url = self.inference_service_url.as_str(),
+            max_wait_time = self.max_wait_time.as_millis(),
+            max_batch_size = self.max_batch_size,
+            "launching inference service worker"
+        );
+        std::future::pending().await
+    }
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]
@@ -64,29 +90,44 @@ async fn embed(
     Ok(Json(embeddings))
 }
 
-pub fn api(config: Config) -> anyhow::Result<Router> {
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(2_000))
-        .build()
-        .context("Faield to initialize http client")?;
-    let ctx = Arc::new(AppContext {
-        config,
-        http_client,
-    });
-    let router = Router::new()
-        .route("/embed", post(embed))
-        .with_state(Arc::clone(&ctx));
-    Ok(router)
-}
-
 pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = SocketAddr::from((config.ip, config.port));
     let listener = TcpListener::bind(addr).await?;
-    let app = api(config)?;
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(2_000))
+        .build()
+        .context("Failed to initialize http client")?;
+    let ctx = Arc::new(AppContext {
+        config: config.clone(),
+        http_client: http_client.clone(),
+    });
+
+    let (_tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
+    let mut worker = InferenceServiceWorker {
+        chan: rx,
+        http_client,
+        max_wait_time: Duration::from_millis(config.max_wait_time),
+        max_batch_size: config.max_batch_size,
+        inference_service_url: config.inference_service_url,
+        inference_service_key: config.inference_service_key,
+    };
+
+    let router = Router::new()
+        .route("/embed", post(embed))
+        .with_state(Arc::clone(&ctx));
+
     info!("Launching application at {:?}", &addr);
-    Ok(axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?)
+
+    tokio::select! {
+        res = axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal()) => {
+            res.context("htpp server exited")
+        },
+        res = tokio::spawn(async move { worker.run().await }) => {
+            res.context("inference worker exited")
+        }
+    }
 }
 
 /// Graceful shutdown signal.
