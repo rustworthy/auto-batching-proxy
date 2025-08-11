@@ -40,6 +40,7 @@ impl<T> InferenceServiceWorker<T> {
     {
         let config = config.into();
         let http_client = reqwest::Client::builder()
+            // TODO: make this configurable
             .timeout(Duration::from_millis(2_000))
             .build()
             .context("Failed to initialize http client")?;
@@ -83,7 +84,10 @@ impl InferenceServiceWorker<crate::Message> {
                                 }
                             }
                         }
-                        self.process_next_message(msg).await;
+                        debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
+                        self.queue.push(msg);
+                        if self.queue.len() < self.config.max_batch_size { continue; }
+                        self.flush_batch().await
                     } else { break; }
                 },
                 _ = async {
@@ -99,12 +103,7 @@ impl InferenceServiceWorker<crate::Message> {
         Ok(())
     }
 
-    async fn process_next_message(&mut self, msg: crate::Message) {
-        debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
-        self.queue.push(msg);
-        if self.queue.len() < self.config.max_batch_size {
-            return;
-        }
+    async fn flush_batch(&mut self) {
         let batch = std::mem::take(&mut self.queue);
         let inputs: Vec<_> = batch
             .iter()

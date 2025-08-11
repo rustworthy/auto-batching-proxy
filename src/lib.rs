@@ -67,7 +67,7 @@ async fn embed(
 pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = SocketAddr::from((config.ip, config.port));
     let listener = TcpListener::bind(addr).await?;
-
+    // TODO: make this configurable?
     let (tx, rx) = mpsc::channel::<Message>(1000);
     let mut worker = InferenceServiceWorker::init(rx, config)?;
     let ctx = Arc::new(AppContext {
