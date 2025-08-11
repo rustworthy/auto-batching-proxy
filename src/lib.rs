@@ -5,95 +5,35 @@ extern crate serde;
 
 mod config;
 mod error;
+mod services;
 
+use crate::error::Error;
+use crate::services::inference::InferenceServiceWorker;
 use anyhow::Context;
 use axum::extract::State;
 use axum::routing::post;
-use axum::{Json, Router, debug_handler};
-pub use config::Config;
-use secrecy::SecretString;
+use axum::{Json, Router};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
-use url::Url;
 
-use crate::error::Error;
+pub use config::Config;
 
-type Message = (EmbedRequest, oneshot::Sender<Vec<Embedding>>);
-
-#[allow(unused)]
-struct InferenceServiceWorker<T> {
-    chan: mpsc::Receiver<T>,
-    http_client: reqwest::Client,
-    max_wait_time: Duration,
-    max_batch_size: usize,
-    inference_service_url: Url,
-    inference_service_key: Option<SecretString>,
-}
-
-impl InferenceServiceWorker<Message> {
-    async fn run(&mut self) -> anyhow::Result<()> {
-        info!(
-            inference_service_url = self.inference_service_url.as_str(),
-            max_wait_time = self.max_wait_time.as_millis(),
-            max_batch_size = self.max_batch_size,
-            "launching inference service worker"
-        );
-
-        let url = self
-            .inference_service_url
-            .join("/embed")
-            .context("Error constucting inference service endpoint path")?;
-
-        while let Some(msg) = self.chan.recv().await {
-            debug!(inputs = ?msg.0.inputs, "inference worker received embedding request");
-            debug!("sending request to inference service");
-            let resp = match self
-                .http_client
-                .post(url.clone())
-                .json(&msg.0)
-                .send()
-                .await
-                .context("Error occurred when calling inference service")
-            {
-                Err(_e) => {
-                    continue;
-                }
-                Ok(resp) => resp,
-            };
-            match resp
-                .json()
-                .await
-                .context("Error occurred when deserializing response from inference service")
-            {
-                Err(_e) => continue,
-                Ok(embeddings) => {
-                    if msg.1.send(embeddings).is_err() {
-                        error!("error sending embeddings back to handler, channel closed");
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
+pub(crate) type Message = (EmbedRequest, oneshot::Sender<Vec<Embedding>>);
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]
 struct Embedding(Vec<f64>);
 
-struct AppContext {
-    inference_service_chan: mpsc::Sender<Message>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmbedRequest {
     inputs: Vec<String>,
 }
+struct AppContext {
+    inference_service_chan: mpsc::Sender<Message>,
+}
 
-#[debug_handler]
 async fn embed(
     State(ctx): State<Arc<AppContext>>,
     Json(embed_req): Json<EmbedRequest>,
@@ -123,20 +63,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
 
     let (tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
-
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(2_000))
-        .build()
-        .context("Failed to initialize http client")?;
-    let mut worker = InferenceServiceWorker {
-        chan: rx,
-        http_client,
-        max_wait_time: Duration::from_millis(config.max_wait_time),
-        max_batch_size: config.max_batch_size,
-        inference_service_url: config.inference_service_url,
-        inference_service_key: config.inference_service_key,
-    };
-
+    let mut worker = InferenceServiceWorker::init(rx, config)?;
     let ctx = Arc::new(AppContext {
         inference_service_chan: tx,
     });
@@ -145,7 +72,6 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .with_state(Arc::clone(&ctx));
 
     info!("Launching application at {:?}", &addr);
-
     tokio::select! {
         res = axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal()) => {
