@@ -78,15 +78,16 @@ impl InferenceServiceWorker<crate::Message> {
                                 Ok(elapsed) => {
                                     self.timeout = Some(self.config.max_wait_time - elapsed);
                                 },
-                                // Conversion to std::Duration errors if timedelta < 0
+                                // conversion to std::Duration errors if timedelta < 0
                                 Err(_) => {
                                     self.timeout = Some(Duration::ZERO);
                                 }
                             }
                         }
-                        debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
+                        trace!(inputs = ?msg.1.inputs, "inference worker received embedding request");
                         self.queue.push(msg);
                         if self.queue.len() < self.config.max_batch_size { continue; }
+                        trace!("max batch size reached, sending to inference service");
                         self.flush_batch().await
                     } else { break; }
                 },
@@ -94,7 +95,10 @@ impl InferenceServiceWorker<crate::Message> {
                         let timeout = self.timeout.take().expect("only polled by tokio if cond is true");
                         tokio::time::sleep(timeout).await
                     }, if self.timeout.is_some() => {
-                    panic!("Reaching!!!");
+                    trace!(
+                        batch_size = self.queue.len(),
+                        "timeout reached, sending accumulated requests");
+                    self.flush_batch().await
                 },
 
             }
@@ -112,7 +116,6 @@ impl InferenceServiceWorker<crate::Message> {
             // to be able to link reqests and responses
             .flat_map(|(_, req, _)| req.inputs.clone())
             .collect();
-        debug!(inputs = ?inputs, "max batch size reached, sending to inference service");
 
         let resp = match self
             .client
@@ -161,7 +164,7 @@ impl InferenceServiceWorker<crate::Message> {
             offset += limit;
         }
 
-        trace!("faned out results and unset timeout until next request");
+        trace!("fanned out results and unset timeout until next request");
         self.timeout = None;
     }
 }
