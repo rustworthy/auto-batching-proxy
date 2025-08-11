@@ -1,4 +1,6 @@
 use anyhow::Context;
+use chrono::Utc;
+use core::panic;
 use secrecy::SecretString;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -64,13 +66,33 @@ impl InferenceServiceWorker<crate::Message> {
             "launching inference service worker"
         );
 
+        let mut timeout: Option<Duration> = None;
+
         loop {
             tokio::select! {
                 res = self.chan.recv() => {
                     if let Some(msg) = res {
+                        if self.queue.is_empty() {
+                            match (Utc::now() - msg.0).to_std() {
+                                Ok(elapsed) => {
+                                    timeout = Some(self.config.max_wait_time - elapsed);
+                                },
+                                // Conversion to std::Duration errors if timedelta < 0
+                                Err(_) => {
+                                    timeout = Some(Duration::ZERO);
+                                }
+                            }
+                        }
                         self.process_next_message(msg).await;
                     } else { break; }
-                }
+                },
+                _ = async {
+                        let timeout = timeout.expect("only polled by tokio if cond is true");
+                        tokio::time::sleep(timeout).await
+                    }, if timeout.is_some() => {
+                    panic!("Reaching!!!");
+                },
+
             }
         }
 
