@@ -31,6 +31,7 @@ pub(crate) struct InferenceServiceWorker<T> {
     chan: mpsc::Receiver<T>,
     config: ServiceWorkerConfig,
     queue: Vec<crate::Message>,
+    timeout: Option<Duration>,
 }
 impl<T> InferenceServiceWorker<T> {
     pub fn init<C>(chan: mpsc::Receiver<T>, config: C) -> anyhow::Result<Self>
@@ -53,6 +54,7 @@ impl<T> InferenceServiceWorker<T> {
             chan,
             config,
             queue,
+            timeout: None,
         })
     }
 }
@@ -66,8 +68,6 @@ impl InferenceServiceWorker<crate::Message> {
             "launching inference service worker"
         );
 
-        let mut timeout: Option<Duration> = None;
-
         loop {
             tokio::select! {
                 res = self.chan.recv() => {
@@ -75,11 +75,11 @@ impl InferenceServiceWorker<crate::Message> {
                         if self.queue.is_empty() {
                             match (Utc::now() - msg.0).to_std() {
                                 Ok(elapsed) => {
-                                    timeout = Some(self.config.max_wait_time - elapsed);
+                                    self.timeout = Some(self.config.max_wait_time - elapsed);
                                 },
                                 // Conversion to std::Duration errors if timedelta < 0
                                 Err(_) => {
-                                    timeout = Some(Duration::ZERO);
+                                    self.timeout = Some(Duration::ZERO);
                                 }
                             }
                         }
@@ -87,9 +87,9 @@ impl InferenceServiceWorker<crate::Message> {
                     } else { break; }
                 },
                 _ = async {
-                        let timeout = timeout.expect("only polled by tokio if cond is true");
+                        let timeout = self.timeout.take().expect("only polled by tokio if cond is true");
                         tokio::time::sleep(timeout).await
-                    }, if timeout.is_some() => {
+                    }, if self.timeout.is_some() => {
                     panic!("Reaching!!!");
                 },
 
@@ -161,6 +161,9 @@ impl InferenceServiceWorker<crate::Message> {
             }
             offset += limit;
         }
+
+        trace!("faned out results and unset timeout until next request");
+        self.timeout = None;
     }
 }
 
