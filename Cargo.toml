@@ -1,0 +1,29 @@
+[package]
+name = "auto-batching-proxy"
+version = "0.1.0"
+edition = "2024"
+authors = ["Pavel Mikhalkevich"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+tokio = { version = "1.46.1", features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "signal",
+] }
+axum = { version = "0.8.4", features = ["macros"] }
+serde = { version = "1.0.219", features = ["derive"] }
+figment = { version = "0.10.19", features = ["env"] }
+anyhow = "1.0.98"
+dotenvy = "0.15.7" # only used in debug mode
+reqwest = { version = "0.12.22", default-features = false, features = [
+  "rustls-tls",
+  "json",
+] }
+secrecy = { version = "0.10.3", features = ["serde"] }
+url = { version = "2.5.4", features = ["serde"] }
+
+[dev-dependencies]
