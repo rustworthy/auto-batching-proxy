@@ -34,17 +34,49 @@ struct InferenceServiceWorker<T> {
 }
 
 impl InferenceServiceWorker<Message> {
-    async fn run(&mut self) {
+    async fn run(&mut self) -> anyhow::Result<()> {
         info!(
             inference_service_url = self.inference_service_url.as_str(),
             max_wait_time = self.max_wait_time.as_millis(),
             max_batch_size = self.max_batch_size,
             "launching inference service worker"
         );
+
+        let url = self
+            .inference_service_url
+            .join("/embed")
+            .context("Error constucting inference service endpoint path")?;
+
         while let Some(msg) = self.chan.recv().await {
             debug!(inputs = ?msg.0.inputs, "inference worker received embedding request");
-            drop(msg)
+            debug!("sending request to inference service");
+            let resp = match self
+                .http_client
+                .post(url.clone())
+                .json(&msg.0)
+                .send()
+                .await
+                .context("Error occurred when calling inference service")
+            {
+                Err(_e) => {
+                    continue;
+                }
+                Ok(resp) => resp,
+            };
+            match resp
+                .json()
+                .await
+                .context("Error occurred when deserializing response from inference service")
+            {
+                Err(_e) => continue,
+                Ok(embeddings) => {
+                    if msg.1.send(embeddings).is_err() {
+                        error!("error sending embeddings back to handler, channel closed");
+                    }
+                }
+            }
         }
+        Ok(())
     }
 }
 
@@ -53,8 +85,6 @@ impl InferenceServiceWorker<Message> {
 struct Embedding(Vec<f64>);
 
 struct AppContext {
-    config: Config,
-    http_client: reqwest::Client,
     inference_service_chan: mpsc::Sender<Message>,
 }
 
@@ -72,31 +102,18 @@ async fn embed(
         inputs = ?embed_req.inputs,
         "handler received embded request"
     );
-    let (tx, _rx) = oneshot::channel();
+    let (tx, rx) = oneshot::channel();
     ctx.inference_service_chan
         .send((embed_req.clone(), tx))
         .await
         .context("failed to send message to inference service")?;
 
-    let url = ctx
-        .config
-        .inference_service_url
-        .join("/embed")
-        .context("Error constucting inference service endpoint path")?;
-    debug!(url = %url, "sending request to inference service");
-    let embeddings: Vec<Embedding> = ctx
-        .http_client
-        .post(url)
-        .json(&embed_req)
-        .send()
+    let embeddings = rx
         .await
-        .context("Error occurred when calling inference service")?
-        .json()
-        .await
-        .context("Error occurred when deserializing response from inference service")?;
+        .context("error received message back from inference worker")?;
     debug!(
         embeddings_count = embeddings.len(),
-        "received response from inference service, sending to end-user"
+        "handler received response from inference service worker, sending to end-user"
     );
     Ok(Json(embeddings))
 }
@@ -105,18 +122,12 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = SocketAddr::from((config.ip, config.port));
     let listener = TcpListener::bind(addr).await?;
 
+    let (tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
+
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_millis(2_000))
         .build()
         .context("Failed to initialize http client")?;
-
-    let (tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
-    let ctx = Arc::new(AppContext {
-        config: config.clone(),
-        http_client: http_client.clone(),
-        inference_service_chan: tx,
-    });
-
     let mut worker = InferenceServiceWorker {
         chan: rx,
         http_client,
@@ -126,6 +137,9 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         inference_service_key: config.inference_service_key,
     };
 
+    let ctx = Arc::new(AppContext {
+        inference_service_chan: tx,
+    });
     let router = Router::new()
         .route("/embed", post(embed))
         .with_state(Arc::clone(&ctx));
@@ -137,8 +151,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal()) => {
             res.context("htpp server exited")
         },
-        res = tokio::spawn(async move { worker.run().await }) => {
-            res.context("inference worker exited")
+        Ok(res) = tokio::spawn(async move { worker.run().await }) => {
+            res.context("worker exited with error")
         }
     }
 }
