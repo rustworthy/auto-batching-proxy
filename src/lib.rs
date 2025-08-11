@@ -20,7 +20,10 @@ use tokio::sync::{mpsc, oneshot};
 
 pub use config::Config;
 
-pub(crate) type Message = (EmbedRequest, oneshot::Sender<Vec<Embedding>>);
+pub(crate) type Message = (
+    EmbedRequest,
+    oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>,
+);
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]
@@ -30,6 +33,7 @@ struct Embedding(Vec<f64>);
 pub(crate) struct EmbedRequest {
     pub inputs: Vec<String>,
 }
+
 struct AppContext {
     inference_service_chan: mpsc::Sender<Message>,
 }
@@ -50,7 +54,7 @@ async fn embed(
 
     let embeddings = rx
         .await
-        .context("falied to receive message back from inference worker")?;
+        .context("failed to receive message back from inference worker")??;
     debug!(
         embeddings_count = embeddings.len(),
         "handler received response from inference service worker, sending to end-user"
@@ -62,7 +66,7 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let addr = SocketAddr::from((config.ip, config.port));
     let listener = TcpListener::bind(addr).await?;
 
-    let (tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
+    let (tx, rx) = mpsc::channel::<Message>(1000);
     let mut worker = InferenceServiceWorker::init(rx, config)?;
     let ctx = Arc::new(AppContext {
         inference_service_chan: tx,

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use secrecy::SecretString;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use url::Url;
 
@@ -87,8 +87,13 @@ impl InferenceServiceWorker<crate::Message> {
                 .await
                 .context("Error occurred when calling inference service")
             {
-                Err(_e) => {
-                    // TODO: we should send back error to _each_ client
+                Err(e) => {
+                    let err = Arc::new(e);
+                    for (_, chan) in batch {
+                        if chan.send(Err(Arc::clone(&err))).is_err() {
+                            error!("error sending embeddings back to handler, channel closed");
+                        }
+                    }
                     continue;
                 }
                 Ok(resp) => resp,
@@ -121,7 +126,7 @@ impl InferenceServiceWorker<crate::Message> {
                     limit, "projecting into embeddings to get repsonses for this handler"
                 );
                 let embeddings = &embeddings[offset..offset + limit];
-                if chan.send(embeddings.to_owned()).is_err() {
+                if chan.send(Ok(embeddings.to_owned())).is_err() {
                     error!("error sending embeddings back to handler, channel closed");
                 }
                 offset += limit;
