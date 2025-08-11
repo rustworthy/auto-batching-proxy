@@ -64,7 +64,7 @@ impl InferenceServiceWorker<crate::Message> {
             "launching inference service worker"
         );
         while let Some(msg) = self.chan.recv().await {
-            debug!(inputs = ?msg.0.inputs, "inference worker received embedding request");
+            debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
             self.queue.push(msg);
             if self.queue.len() < self.config.max_batch_size {
                 continue;
@@ -75,7 +75,7 @@ impl InferenceServiceWorker<crate::Message> {
                 // TODO: we can consider mem::take'ing here, but we
                 // need to make sure there is a way to store the offset:
                 // to be able to link reqests and responses
-                .flat_map(|(req, _)| req.inputs.clone())
+                .flat_map(|(_, req, _)| req.inputs.clone())
                 .collect();
             debug!(inputs = ?inputs, "max batch size reached, sending to inference service");
 
@@ -113,7 +113,7 @@ impl InferenceServiceWorker<crate::Message> {
 
             // TODO: what if the length of embeddings differs from inputs
             let mut offset = 0;
-            for (req, chan) in batch {
+            for (_, req, chan) in batch {
                 let limit = req.inputs.len();
                 trace!(
                     offset,
@@ -132,7 +132,7 @@ impl InferenceServiceWorker<crate::Message> {
 
 fn broadcast_error(e: anyhow::Error, batch: Vec<crate::Message>) {
     let err = Arc::new(e);
-    for (_, chan) in batch {
+    for (_, _, chan) in batch {
         if chan.send(Err(Arc::clone(&err))).is_err() {
             error!("error sending response back to handler, channel closed");
         }

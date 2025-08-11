@@ -13,6 +13,7 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -21,6 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 pub use config::Config;
 
 pub(crate) type Message = (
+    DateTime<Utc>,
     EmbedRequest,
     oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>,
 );
@@ -48,7 +50,7 @@ async fn embed(
     );
     let (tx, rx) = oneshot::channel();
     ctx.inference_service_chan
-        .send((embed_req.clone(), tx))
+        .send((Utc::now(), embed_req, tx))
         .await
         .context("failed to send message to inference service")?;
 
