@@ -88,12 +88,7 @@ impl InferenceServiceWorker<crate::Message> {
                 .context("Error occurred when calling inference service")
             {
                 Err(e) => {
-                    let err = Arc::new(e);
-                    for (_, chan) in batch {
-                        if chan.send(Err(Arc::clone(&err))).is_err() {
-                            error!("error sending embeddings back to handler, channel closed");
-                        }
-                    }
+                    broadcast_error(e, batch);
                     continue;
                 }
                 Ok(resp) => resp,
@@ -105,9 +100,8 @@ impl InferenceServiceWorker<crate::Message> {
                 .await
                 .context("Error occurred when deserializing response from inference service")
             {
-                Err(_e) => {
-                    trace!(e = ?_e);
-                    // TODO: we should send back error to _each_ client
+                Err(e) => {
+                    broadcast_error(e, batch);
                     continue;
                 }
                 Ok(embeddings) => embeddings,
@@ -133,5 +127,14 @@ impl InferenceServiceWorker<crate::Message> {
             }
         }
         Ok(())
+    }
+}
+
+fn broadcast_error(e: anyhow::Error, batch: Vec<crate::Message>) {
+    let err = Arc::new(e);
+    for (_, chan) in batch {
+        if chan.send(Err(Arc::clone(&err))).is_err() {
+            error!("error sending response back to handler, channel closed");
+        }
     }
 }

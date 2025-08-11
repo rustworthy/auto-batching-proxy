@@ -8,6 +8,7 @@ pub(crate) enum Error {
     #[error("internal error occurred")]
     Anyhow(#[from] anyhow::Error),
 
+    // https://github.com/dtolnay/anyhow/issues/7#issuecomment-539383249
     #[error("internal error occurred")]
     AnyhowArced(#[from] Arc<anyhow::Error>),
 }
@@ -17,12 +18,11 @@ impl IntoResponse for Error {
         match self {
             Error::Anyhow(e) => {
                 error!(error = ?e, "unexpected error occurred");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
             Error::AnyhowArced(e) => {
                 error!(error = ?e, "unexpected error occurred");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
-        }
+        };
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
     }
 }
