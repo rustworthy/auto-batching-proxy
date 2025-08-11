@@ -16,15 +16,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
 use crate::error::Error;
 
+type Message = (EmbedRequest, oneshot::Sender<Vec<Embedding>>);
+
 #[allow(unused)]
 struct InferenceServiceWorker<T> {
-    chan: Receiver<T>,
+    chan: mpsc::Receiver<T>,
     http_client: reqwest::Client,
     max_wait_time: Duration,
     max_batch_size: usize,
@@ -32,7 +33,7 @@ struct InferenceServiceWorker<T> {
     inference_service_key: Option<SecretString>,
 }
 
-impl<T> InferenceServiceWorker<T> {
+impl InferenceServiceWorker<Message> {
     async fn run(&mut self) {
         info!(
             inference_service_url = self.inference_service_url.as_str(),
@@ -40,7 +41,10 @@ impl<T> InferenceServiceWorker<T> {
             max_batch_size = self.max_batch_size,
             "launching inference service worker"
         );
-        std::future::pending().await
+        while let Some(msg) = self.chan.recv().await {
+            debug!(inputs = ?msg.0.inputs, "inference worker received embedding request");
+            drop(msg)
+        }
     }
 }
 
@@ -51,6 +55,7 @@ struct Embedding(Vec<f64>);
 struct AppContext {
     config: Config,
     http_client: reqwest::Client,
+    inference_service_chan: mpsc::Sender<Message>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,9 +69,15 @@ async fn embed(
     Json(embed_req): Json<EmbedRequest>,
 ) -> Result<Json<Vec<Embedding>>, Error> {
     debug!(
-        inputs_count = embed_req.inputs.len(),
-        "received embded request"
+        inputs = ?embed_req.inputs,
+        "handler received embded request"
     );
+    let (tx, _rx) = oneshot::channel();
+    ctx.inference_service_chan
+        .send((embed_req.clone(), tx))
+        .await
+        .context("failed to send message to inference service")?;
+
     let url = ctx
         .config
         .inference_service_url
@@ -98,12 +109,14 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
         .timeout(Duration::from_millis(2_000))
         .build()
         .context("Failed to initialize http client")?;
+
+    let (tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
     let ctx = Arc::new(AppContext {
         config: config.clone(),
         http_client: http_client.clone(),
+        inference_service_chan: tx,
     });
 
-    let (_tx, rx) = mpsc::channel::<(EmbedRequest, oneshot::Sender<Vec<Embedding>>)>(1000);
     let mut worker = InferenceServiceWorker {
         chan: rx,
         http_client,
