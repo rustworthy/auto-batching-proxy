@@ -4,17 +4,19 @@ extern crate tracing;
 extern crate serde;
 
 mod config;
+mod error;
+
 use anyhow::Context;
 use axum::extract::State;
-use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router, debug_handler};
 pub use config::Config;
-use reqwest::StatusCode;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
+
+use crate::error::Error;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]
@@ -34,33 +36,32 @@ struct EmbedRequest {
 async fn embed(
     State(ctx): State<Arc<AppContext>>,
     Json(embed_req): Json<EmbedRequest>,
-) -> Response {
-    let resp = match ctx
+) -> Result<Json<Vec<Embedding>>, Error> {
+    debug!(
+        inputs_count = embed_req.inputs.len(),
+        "received embded request"
+    );
+    let url = ctx
+        .config
+        .inference_service_url
+        .join("/embed")
+        .context("Error constucting inference service endpoint path")?;
+    debug!(url = %url, "sending request to inference service");
+    let embeddings: Vec<Embedding> = ctx
         .http_client
-        .post(ctx.config.inference_service_url.as_ref())
+        .post(url)
         .json(&embed_req)
         .send()
         .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            error!("Error occurred when calling inference service: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-    let embeddings: Vec<Embedding> = match resp.json().await {
-        Ok(vectors) => vectors,
-        Err(e) => {
-            error!(
-                "Error occurred when deserializing response from inference service: {}",
-                e
-            );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    dbg!(&embeddings);
-    Json(embeddings).into_response()
+        .context("Error occurred when calling inference service")?
+        .json()
+        .await
+        .context("Error occurred when deserializing response from inference service")?;
+    debug!(
+        embeddings_count = embeddings.len(),
+        "received response from inference service, sending to end-user"
+    );
+    Ok(Json(embeddings))
 }
 
 pub fn api(config: Config) -> anyhow::Result<Router> {

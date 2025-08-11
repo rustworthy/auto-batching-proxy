@@ -52,6 +52,7 @@ dependencies = [
  "reqwest",
  "secrecy",
  "serde",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
