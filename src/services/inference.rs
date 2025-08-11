@@ -63,70 +63,82 @@ impl InferenceServiceWorker<crate::Message> {
             max_batch_size = self.config.max_batch_size,
             "launching inference service worker"
         );
-        while let Some(msg) = self.chan.recv().await {
-            debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
-            self.queue.push(msg);
-            if self.queue.len() < self.config.max_batch_size {
-                continue;
-            }
-            let batch = std::mem::take(&mut self.queue);
-            let inputs: Vec<_> = batch
-                .iter()
-                // TODO: we can consider mem::take'ing here, but we
-                // need to make sure there is a way to store the offset:
-                // to be able to link reqests and responses
-                .flat_map(|(_, req, _)| req.inputs.clone())
-                .collect();
-            debug!(inputs = ?inputs, "max batch size reached, sending to inference service");
 
-            let resp = match self
-                .client
-                .post(self.embed_endpoint.clone())
-                .json(&crate::EmbedRequest { inputs })
-                .send()
-                .await
-                .context("Error occurred when calling inference service")
-            {
-                Err(e) => {
-                    broadcast_error(e, batch);
-                    continue;
+        loop {
+            tokio::select! {
+                res = self.chan.recv() => {
+                    if let Some(msg) = res {
+                        self.process_next_message(msg).await;
+                    } else { break; }
                 }
-                Ok(resp) => resp,
-            };
-            trace!("got response from inference service");
-
-            let embeddings: Vec<crate::Embedding> = match resp
-                .json()
-                .await
-                .context("Error occurred when deserializing response from inference service")
-            {
-                Err(e) => {
-                    broadcast_error(e, batch);
-                    continue;
-                }
-                Ok(embeddings) => embeddings,
-            };
-            trace!(
-                embeddings_count = embeddings.len(),
-                "parsed json content out of inference service response"
-            );
-
-            // TODO: what if the length of embeddings differs from inputs
-            let mut offset = 0;
-            for (_, req, chan) in batch {
-                let limit = req.inputs.len();
-                trace!(
-                    offset,
-                    limit, "projecting into embeddings to get repsonses for this handler"
-                );
-                let embeddings = &embeddings[offset..offset + limit];
-                if chan.send(Ok(embeddings.to_owned())).is_err() {
-                    error!("error sending embeddings back to handler, channel closed");
-                }
-                offset += limit;
             }
         }
+
         Ok(())
+    }
+
+    async fn process_next_message(&mut self, msg: crate::Message) {
+        debug!(inputs = ?msg.1.inputs, "inference worker received embedding request");
+        self.queue.push(msg);
+        if self.queue.len() < self.config.max_batch_size {
+            return;
+        }
+        let batch = std::mem::take(&mut self.queue);
+        let inputs: Vec<_> = batch
+            .iter()
+            // TODO: we can consider mem::take'ing here, but we
+            // need to make sure there is a way to store the offset:
+            // to be able to link reqests and responses
+            .flat_map(|(_, req, _)| req.inputs.clone())
+            .collect();
+        debug!(inputs = ?inputs, "max batch size reached, sending to inference service");
+
+        let resp = match self
+            .client
+            .post(self.embed_endpoint.clone())
+            .json(&crate::EmbedRequest { inputs })
+            .send()
+            .await
+            .context("Error occurred when calling inference service")
+        {
+            Err(e) => {
+                broadcast_error(e, batch);
+                return;
+            }
+            Ok(resp) => resp,
+        };
+        trace!("got response from inference service");
+
+        let embeddings: Vec<crate::Embedding> = match resp
+            .json()
+            .await
+            .context("Error occurred when deserializing response from inference service")
+        {
+            Err(e) => {
+                broadcast_error(e, batch);
+                return;
+            }
+            Ok(embeddings) => embeddings,
+        };
+        trace!(
+            embeddings_count = embeddings.len(),
+            "parsed json content out of inference service response"
+        );
+
+        // TODO: what if the length of embeddings differs from inputs
+        let mut offset = 0;
+        for (_, req, chan) in batch {
+            let limit = req.inputs.len();
+            trace!(
+                offset,
+                limit, "projecting into embeddings to get repsonses for this handler"
+            );
+            let embeddings = &embeddings[offset..offset + limit];
+            if chan.send(Ok(embeddings.to_owned())).is_err() {
+                error!("error sending embeddings back to handler, channel closed");
+            }
+            offset += limit;
+        }
     }
 }
 
