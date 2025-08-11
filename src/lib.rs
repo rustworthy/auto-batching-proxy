@@ -27,8 +27,8 @@ pub(crate) type Message = (EmbedRequest, oneshot::Sender<Vec<Embedding>>);
 struct Embedding(Vec<f64>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct EmbedRequest {
-    inputs: Vec<String>,
+pub(crate) struct EmbedRequest {
+    pub inputs: Vec<String>,
 }
 struct AppContext {
     inference_service_chan: mpsc::Sender<Message>,
@@ -50,7 +50,7 @@ async fn embed(
 
     let embeddings = rx
         .await
-        .context("error received message back from inference worker")?;
+        .context("falied to receive message back from inference worker")?;
     debug!(
         embeddings_count = embeddings.len(),
         "handler received response from inference service worker, sending to end-user"
