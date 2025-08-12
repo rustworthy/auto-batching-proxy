@@ -36,12 +36,13 @@ pub(crate) struct EmbedRequest {
     pub inputs: Vec<String>,
 }
 
+#[derive(Clone)]
 struct AppContext {
     inference_service_chan: mpsc::Sender<Message>,
 }
 
 async fn embed(
-    State(ctx): State<Arc<AppContext>>,
+    State(ctx): State<AppContext>,
     Json(embed_req): Json<EmbedRequest>,
 ) -> Result<Json<Vec<Embedding>>, Error> {
     debug!(
@@ -70,12 +71,11 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     // TODO: make this configurable?
     let (tx, rx) = mpsc::channel::<Message>(1000);
     let mut worker = InferenceServiceWorker::init(rx, config)?;
-    let ctx = Arc::new(AppContext {
-        inference_service_chan: tx,
-    });
     let router = Router::new()
         .route("/embed", post(embed))
-        .with_state(Arc::clone(&ctx));
+        .with_state(AppContext {
+            inference_service_chan: tx,
+        });
 
     info!("Launching application at {:?}", &addr);
     tokio::select! {
