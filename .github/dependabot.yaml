@@ -8,7 +8,7 @@ updates:
 
   # -------------------------------- BACKEND -----------------------------------
   - package-ecosystem: cargo
-    directory: /backend
+    directory: /
     schedule:
       interval: monthly
     groups:
@@ -19,7 +19,7 @@ updates:
           - "minor"
 
   - package-ecosystem: docker
-    directory: /backend
+    directory: /
     schedule:
       interval: monthly
 
