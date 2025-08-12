@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # --------------------------------- CI/CD ------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  # -------------------------------- BACKEND -----------------------------------
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: monthly
+    groups:
+      cargo-bump:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: monthly
+
