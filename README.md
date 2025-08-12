@@ -104,10 +104,80 @@ docker compose up --build
 ```
 
 The command above will build our proxy app, launch the upstream inference service
-first, make sure it is ready, and then launch the proxy app.
+first, make sure it is ready, and then launch the proxy app. The initial image build
+takes some time plus the model need some warm up, so the "cold" start can take
+up to a few minutes.
 
 If you tweak `MAX_WAIT_TIME` and `MAX_BATCH_SIZE` parameters in your `.env`
 file, make sure to restart the containers.
+
+## Benchmarking
+
+We've set `MAX_WAIT_TIME` to `5000` (5 seconds) and `MAX_BATCH_SIZE` to `100`.
+We then launched the services as described [above](#demo) and used the [`oha`][5]
+utility to generate some load.
+
+### With proxy
+
+The command used:
+
+```console
+oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' http://localhost:8081/embed
+```
+
+Which gave the following results:
+
+```
+  Success rate: 100.00%
+  Total:        30.0043 sec
+  Slowest:      4.7727 sec
+  Fastest:      0.0550 sec
+  Average:      3.5334 sec
+  Requests/sec: 59.7247
+
+  Total data:   28.81 MiB
+  Size/request: 18.53 KiB
+  Size/sec:     983.15 KiB
+
+```
+
+### Without proxy
+
+We've used same utility on the same hardware and some max batch size and max wait,
+but specified the upstream service's port in the command for direct communitation.
+The command used (note the port number and see how we are mapping to this host port
+in our [`compose`](./compose.yaml)):
+
+```console
+oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' http://localhost:8080/embed
+```
+
+```
+  Success rate: 100.00%
+  Total:        30.0050 sec
+  Slowest:      3.5077 sec
+  Fastest:      0.0444 sec
+  Average:      2.1521 sec
+  Requests/sec: 95.9508
+
+  Total data:   48.48 MiB
+  Size/request: 18.53 KiB
+  Size/sec:     1.62 MiB
+
+```
+
+You can see that the fastest requests are pretty close which implies our wrapper
+does not introduce that much of overhead in general. But in general - upon a few
+load test runs - we are observing that fewer requests per second when sending
+via the batching proxy. Apparently, we are compensating this with some gains
+elsewhere - in the resources savings on the upstream service side and reduced
+costs for each individual user.
+
+Also it makes sense to play around and fine-tune the `MAX_WAIT_TIME` and
+`MAX_BATCH_SIZE` parameters, e.g. when we first tried the test with our development
+settings (`MAX_BATCH_SIZE` set to `2` simply because it made it easier to quick-test
+during the development from two additional terminal windows), the results for the
+proxy solution were worse and bumping the batch limit to `100` gave us better results.
 
 ## Dev Setup
 
@@ -139,3 +209,4 @@ the `make watch` command as described above).
 [2]: https://www.gnu.org/software/make/
 [3]: https://docs.docker.com/engine/install/
 [4]: https://github.com/huggingface/text-embeddings-inference
+[5]: https://github.com/hatoo/oha?tab=readme-ov-file#installation
