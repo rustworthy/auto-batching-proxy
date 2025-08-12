@@ -1,0 +1,27 @@
+services:
+  inference:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: --model-id nomic-ai/nomic-embed-text-v1.5
+    ports:
+     - "127.0.0.1:8080:80"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:80/embed", "-X", "POST", "-d", '{"inputs":["ping"]}', "-H", "Content-Type: application/json"]
+      interval: 3s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+  proxy:
+    build:
+      context: .
+    ports:
+     - "127.0.0.1:8081:8081"
+    env_file:
+      - .env
+    environment:
+      - IP=0.0.0.0
+      - PORT=8081
+      - INFERENCE_SERVICE_URL=http://inference:80
+    depends_on:
+      inference:
+        condition: service_healthy
+

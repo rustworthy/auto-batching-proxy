@@ -86,7 +86,30 @@ send `["hello", "world"]` to the upstream server.
 Each time the batch get "flushed", the timeout gets unset and the queue gets
 emptied.
 
-## Setup
+## Demo
+
+NB: make sure you got [`GNU Make`][2], and [`docker`][3] installed.
+
+Populate your very own local `.env` file with:
+
+```console
+make dotenv
+```
+
+You can now launch the auto-batching proxy together with the inference service
+with a single command:
+
+```console
+docker compose up --build
+```
+
+The command above will build our proxy app, launch the upstream inference service
+first, make sure it is ready, and then launch the proxy app.
+
+If you tweak `MAX_WAIT_TIME` and `MAX_BATCH_SIZE` parameters in your `.env`
+file, make sure to restart the containers.
+
+## Dev Setup
 
 Make sure you got [`cargo`][1], [`GNU Make`][2], and [`docker`][3] installed,
 and hit:
