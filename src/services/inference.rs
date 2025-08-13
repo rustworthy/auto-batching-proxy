@@ -118,10 +118,7 @@ impl InferenceServiceWorker<crate::Message> {
                             continue;
                         }
                         trace!("max batch size reached, sending to inference service");
-
-                        self.timeout.take();
-                        let batch = std::mem::take(&mut self.queue);
-                        tokio::spawn(process_batch(batch, Arc::clone(&self.client)));
+                        self.flush();
                     } else { break; }
                 },
                 _ = async {
@@ -130,16 +127,24 @@ impl InferenceServiceWorker<crate::Message> {
                     }, if self.timeout.is_some() => {
                     trace!(
                         batch_size = self.queue.len(),
-                        "timeout reached, sending accumulated requests");
-
-                    let batch = std::mem::take(&mut self.queue);
-                    tokio::spawn(process_batch(batch, Arc::clone(&self.client)));
+                        "timeout reached, sending accumulated requests"
+                    );
+                    self.flush();
                 },
 
             }
         }
 
         Ok(())
+    }
+
+    fn flush(&mut self) {
+        let batch = std::mem::replace(
+            &mut self.queue,
+            Vec::with_capacity(self.config.max_batch_size),
+        );
+        tokio::spawn(process_batch(batch, Arc::clone(&self.client)));
+        self.timeout.take();
     }
 }
 
