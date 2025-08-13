@@ -100,7 +100,7 @@ You can now launch the auto-batching proxy together with the inference service
 with a single command:
 
 ```console
-docker compose up --build # same as `make compose/up`
+docker compose up --build
 ```
 
 The command above will build our proxy app, launch the upstream inference service
