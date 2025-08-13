@@ -100,7 +100,7 @@ You can now launch the auto-batching proxy together with the inference service
 with a single command:
 
 ```console
-docker compose up --build
+docker compose up --build # same as `make compose/up`
 ```
 
 The command above will build our proxy app, launch the upstream inference service
@@ -119,7 +119,7 @@ utility to generate some load.
 
 ### With proxy
 
-The command used:
+The command used (see `load` target in [`Makefile`](./Makefile)):
 
 ```console
 oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' http://localhost:8081/embed
@@ -146,7 +146,8 @@ Which gave the following results:
 We've used same utility on the same hardware and some max batch size and max wait,
 but specified the upstream service's port in the command for direct communitation.
 The command used (note the port number and see how we are mapping to this host port
-in our [`compose`](./compose.yaml)):
+in our [`compose`](./compose.yaml) and also take a look at `load/noproxy`
+target in [`Makefile`](./Makefile))):
 
 ```console
 oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' http://localhost:8080/embed

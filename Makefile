@@ -61,3 +61,20 @@ check:
 	cargo clippy --all-features --all-targets
 	cargo doc --no-deps --all-features
 
+# ------------------------- TESTING COMMANDS -------------------------------
+.phony: compose/up
+compose/up: inference/stop
+	docker compose up --build
+
+.phony: load
+load:
+	oha -c 200 -z 30s --latency-correction \
+		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \
+		http://localhost:${APP_PORT}/embed
+
+.phony: load/noproxy
+load/noproxy:
+	oha -c 200 -z 30s --latency-correction \
+		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \
+		http://localhost:${INFERENCE_SERVICE_PORT}/embed
+
