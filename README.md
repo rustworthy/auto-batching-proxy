@@ -114,7 +114,9 @@ file, make sure to restart the containers.
 ## Benchmarking
 
 We've set `MAX_WAIT_TIME` to `1000` (1 second) and `MAX_BATCH_SIZE` to `8`
-(the upstream service's text embedding router batch cap).
+(the upstream service's text embedding router batch cap), and `RUST_LOG`
+set tot "auto_batching_proxy=error,axum=error".
+
 We then launched the services as described [above](#demo) and used the [`oha`][5]
 utility to generate some load.
 
@@ -130,15 +132,15 @@ Which gave the following results:
 
 ```
   Success rate: 100.00%
-  Total:        30.0051 sec
-  Slowest:      2.0984 sec
-  Fastest:      0.2075 sec
-  Average:      1.8797 sec
-  Requests/sec: 109.5812
+  Total:        30.0039 sec
+  Slowest:      2.0037 sec
+  Fastest:      0.2129 sec
+  Average:      1.6135 sec
+  Requests/sec: 126.6503
 
-  Total data:   37.20 MiB
-  Size/request: 12.34 KiB
-  Size/sec:     1.24 MiB
+  Total data:   62.68 MiB
+  Size/request: 17.83 KiB
+  Size/sec:     2.09 MiB
 ```
 
 ### Without proxy
@@ -155,30 +157,32 @@ oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Se
 
 ```
   Success rate: 100.00%
-  Total:        30.0055 sec
-  Slowest:      2.3149 sec
-  Fastest:      0.1060 sec
-  Average:      1.6606 sec
-  Requests/sec: 123.8106
+  Total:        30.0047 sec
+  Slowest:      2.1063 sec
+  Fastest:      0.0452 sec
+  Average:      1.6371 sec
+  Requests/sec: 124.8803
 
-  Total data:   63.61 MiB
+  Total data:   64.19 MiB
   Size/request: 18.53 KiB
-  Size/sec:     2.12 MiB
+  Size/sec:     2.14 MiB
 ```
 
 The reports above are examples from one single test run. In general - upon a few
-load test runs - we are observing that fewer requests per second when sending
-via the batching proxy (circa 20% reduction). The slowest requests are pretty
-close to each other, while the fast request request without proxy is 2.5x faster
-(30-100ms vs 100-200ms), i.e. our wrap _does_ introduce some overhead.
-Apparently, we are compensating for this with the gains elsewhere - in the resources
-savings on the upstream service size and reduced costs for each individual user.
+load test runs - we are observing pretty close request per second indicator.
+Also the slowest requests are pretty close to each other, while the fastest request
+without proxy is 2.5x faster (~30-100ms vs ~100-200ms), i.e. our wrapper _does_
+introduce some overhead. Apparently, we are compensating for this with the gains
+elsewhere - in the resources savings on the upstream service size and reduced costs
+for each individual user.
 
 Also it makes sense to play around and fine-tune the `MAX_WAIT_TIME` and
 `MAX_BATCH_SIZE` parameters, e.g. when we first tried the test with our development
 settings (`MAX_BATCH_SIZE` set to `2` simply because it made it easier to quick-test
 during the development from two additional terminal windows), the results for the
 proxy solution were worse and bumping the batch limit to `100` gave us better results.
+Also subscribing for debug and trace events and writing those to stdout slows our
+application down, so we ended up testing with
 
 ## Dev Setup
 
