@@ -61,7 +61,7 @@ JSON representation to the end-user.
 The worker just listens for messages from the axum handlers. The worker keeps
 some state: it has got a message queue with a capacity as per `MAX_BATCH_SIZE`
 and a timeout as per `MAX_WAIT_TIME` - whichever comes first will make the worker
-to send the batch to the upstream service. If an error is received from the
+send the batch to the upstream service. If an error is received from the
 upstream inference service, it gets "broadcast" to the handlers. If the embeddings
 are received, the worker will make sure to not send the entirety of it to each
 handler, rather only the segment that corresponds to the handler's inputs. We
@@ -69,7 +69,7 @@ are relying here on the fact that the upstream service returns an array of embed
 in which an embdedding at index N is the result for the query at index N in the
 inputs container in our request.
 
-To give a concrete example, image the batch size is set to `2`, and the first
+To give a concrete example, imagine the batch size is set to `2`, and the first
 request contains inputs array `["hello", "world"]` while the second request has
 only one item `["bye"]` - the worker will flatten these two into one array and
 send to the upstream service as `["hello", "world", "bye"]`. The response our worker
@@ -168,6 +168,8 @@ oha -c 200 -z 30s --latency-correction -m POST -d '{"inputs":["What is Vector Se
   Size/sec:     2.14 MiB
 ```
 
+### Observations
+
 The reports above are examples from one single test run. In general - upon a few
 load test runs - we are observing pretty close request per second indicator.
 Also the slowest requests are pretty close to each other, while the fastest request
@@ -176,13 +178,31 @@ introduce some overhead. Apparently, we are compensating for this with the gains
 elsewhere - in the resources savings on the upstream service size and reduced costs
 for each individual user.
 
-Also it makes sense to play around and fine-tune the `MAX_WAIT_TIME` and
-`MAX_BATCH_SIZE` parameters, e.g. when we first tried the test with our development
-settings (`MAX_BATCH_SIZE` set to `2` simply because it made it easier to quick-test
-during the development from two additional terminal windows), the results for the
-proxy solution were worse and bumping the batch limit to `100` gave us better results.
-Also subscribing for debug and trace events and writing those to stdout slows our
-application down, so we ended up testing with
+Subscribing for debug and trace events and writing those to stdout slows our
+application down (~20% bandwidth reduction), so we ended up testing with error+
+events level.
+
+We also tried loading our auto-batching proxy with `MAX_BATCH_SIZE` set to `1`
+(and all other parameters the same), which gave us results close to those without
+proxy. Here are stats from one of the runs:
+
+```
+  Success rate: 100.00%
+  Total:        30.0061 sec
+  Slowest:      2.0051 sec
+  Fastest:      0.0672 sec
+  Average:      1.5677 sec
+  Requests/sec: 129.8068
+
+  Total data:   65.14 MiB
+  Size/request: 18.05 KiB
+  Size/sec:     2.17 MiB
+```
+
+Which checks out: with the current implementation, the 8th client in the proxied
+scenario with 8 messages per batch will wait till the preceding 7 clients get
+their slices of the upstream inference service response. We could play around this
+and try and improve implementation so reduce the proxy overhead.
 
 ## Dev Setup
 
