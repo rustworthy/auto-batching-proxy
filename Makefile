@@ -9,11 +9,13 @@ INFERENCE_SERVICE_CONTAINER_NAME=inference-service
 tools/install:
 	cargo install cargo-watch
 	cargo install bunyan
+	cargo install oha
 
 .PHONY: tools/uninstall
 tools/uninstall:
 	@cargo uninstall cargo-watch > /dev/null 2>&1 || true
 	@cargo uninstall bunyan > /dev/null 2>&1 || true
+	@cargo uninstall oha > /dev/null 2>&1 || true
 
 # ------------------------- INFERENCE SERIVCE COMMANDS -------------------------
 .PHONY: inference/start
@@ -62,19 +64,15 @@ check:
 	cargo doc --no-deps --all-features
 
 # ------------------------- TESTING COMMANDS -------------------------------
-.phony: compose/up
-compose/up: inference/stop
-	docker compose up --build
-
 .phony: load
 load:
-	oha -c 200 -z 30s --latency-correction \
+	oha -c 200 -z $(duration) --latency-correction \
 		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \
 		http://localhost:${APP_PORT}/embed
 
 .phony: load/noproxy
 load/noproxy:
-	oha -c 200 -z 30s --latency-correction \
+	oha -c 200 -z $(duration) --latency-correction \
 		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \
 		http://localhost:${INFERENCE_SERVICE_PORT}/embed
 
