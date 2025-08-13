@@ -6,6 +6,27 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use url::Url;
 
+struct InferenceServiceClient {
+    http_client: reqwest::Client,
+    embed_endpoint: Url,
+}
+
+impl InferenceServiceClient {
+    async fn embed(&self, inputs: Vec<String>) -> anyhow::Result<Vec<crate::Embedding>> {
+        let embeddings = self
+            .http_client
+            .post(self.embed_endpoint.clone())
+            .json(&crate::EmbedRequest { inputs })
+            .send()
+            .await
+            .context("Error occurred when calling inference service")?
+            .json()
+            .await
+            .context("Error occurred when deserializing response from inference service")?;
+        Ok(embeddings)
+    }
+}
+
 pub(crate) struct ServiceWorkerConfig {
     max_wait_time: Duration,
     max_batch_size: usize,
@@ -24,15 +45,14 @@ impl From<crate::Config> for ServiceWorkerConfig {
         }
     }
 }
-
 pub(crate) struct InferenceServiceWorker<T> {
-    client: reqwest::Client,
-    embed_endpoint: Url,
+    client: InferenceServiceClient,
     chan: mpsc::Receiver<T>,
     config: ServiceWorkerConfig,
     queue: Vec<crate::Message>,
     timeout: Option<Duration>,
 }
+
 impl<T> InferenceServiceWorker<T> {
     pub fn init<C>(chan: mpsc::Receiver<T>, config: C) -> anyhow::Result<Self>
     where
@@ -48,10 +68,14 @@ impl<T> InferenceServiceWorker<T> {
             .inference_service_url
             .join("/embed")
             .context("Error constucting inference service endpoint path")?;
-        let queue = Vec::with_capacity(config.max_batch_size);
-        Ok(Self {
-            client: http_client,
+        let client = InferenceServiceClient {
+            http_client,
             embed_endpoint,
+        };
+        let queue = Vec::with_capacity(config.max_batch_size);
+
+        Ok(Self {
+            client,
             chan,
             config,
             queue,
@@ -91,7 +115,7 @@ impl InferenceServiceWorker<crate::Message> {
 
                         self.timeout.take();
                         let batch = std::mem::take(&mut self.queue);
-                        process_batch(batch, &self.client, self.embed_endpoint.clone()).await
+                        process_batch(batch, &self.client).await
                     } else { break; }
                 },
                 _ = async {
@@ -103,7 +127,7 @@ impl InferenceServiceWorker<crate::Message> {
                         "timeout reached, sending accumulated requests");
 
                     let batch = std::mem::take(&mut self.queue);
-                    process_batch(batch, &self.client, self.embed_endpoint.clone()).await
+                    process_batch(batch, &self.client).await
                 },
 
             }
@@ -122,7 +146,7 @@ fn broadcast_error(e: anyhow::Error, batch: Vec<crate::Message>) {
     }
 }
 
-async fn process_batch(batch: Vec<crate::Message>, client: &reqwest::Client, endpoint: Url) {
+async fn process_batch(batch: Vec<crate::Message>, client: &InferenceServiceClient) {
     let inputs: Vec<_> = batch
         .iter()
         // TODO: we can consider mem::take'ing here, but we
@@ -131,35 +155,16 @@ async fn process_batch(batch: Vec<crate::Message>, client: &reqwest::Client, end
         .flat_map(|(_, req, _)| req.inputs.clone())
         .collect();
 
-    let resp = match client
-        .post(endpoint)
-        .json(&crate::EmbedRequest { inputs })
-        .send()
-        .await
-        .context("Error occurred when calling inference service")
-    {
+    let embeddings = match client.embed(inputs).await {
         Err(e) => {
             broadcast_error(e, batch);
             return;
         }
         Ok(resp) => resp,
     };
-    trace!("got response from inference service");
-
-    let embeddings: Vec<crate::Embedding> = match resp
-        .json()
-        .await
-        .context("Error occurred when deserializing response from inference service")
-    {
-        Err(e) => {
-            broadcast_error(e, batch);
-            return;
-        }
-        Ok(embeddings) => embeddings,
-    };
     trace!(
         embeddings_count = embeddings.len(),
-        "parsed json content out of inference service response"
+        "got embeddings from inference service"
     );
 
     // TODO: what if the length of embeddings differs from inputs
