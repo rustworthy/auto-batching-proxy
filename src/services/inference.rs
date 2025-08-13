@@ -46,7 +46,7 @@ impl From<crate::Config> for ServiceWorkerConfig {
     }
 }
 pub(crate) struct InferenceServiceWorker<T> {
-    client: InferenceServiceClient,
+    client: Arc<InferenceServiceClient>,
     chan: mpsc::Receiver<T>,
     config: ServiceWorkerConfig,
     queue: Vec<crate::Message>,
@@ -68,10 +68,10 @@ impl<T> InferenceServiceWorker<T> {
             .inference_service_url
             .join("/embed")
             .context("Error constucting inference service endpoint path")?;
-        let client = InferenceServiceClient {
+        let client = Arc::new(InferenceServiceClient {
             http_client,
             embed_endpoint,
-        };
+        });
         let queue = Vec::with_capacity(config.max_batch_size);
 
         Ok(Self {
@@ -115,7 +115,7 @@ impl InferenceServiceWorker<crate::Message> {
 
                         self.timeout.take();
                         let batch = std::mem::take(&mut self.queue);
-                        process_batch(batch, &self.client).await
+                        tokio::spawn(process_batch(batch, Arc::clone(&self.client)));
                     } else { break; }
                 },
                 _ = async {
@@ -127,7 +127,7 @@ impl InferenceServiceWorker<crate::Message> {
                         "timeout reached, sending accumulated requests");
 
                     let batch = std::mem::take(&mut self.queue);
-                    process_batch(batch, &self.client).await
+                    tokio::spawn(process_batch(batch, Arc::clone(&self.client)));
                 },
 
             }
@@ -146,7 +146,7 @@ fn broadcast_error(e: anyhow::Error, batch: Vec<crate::Message>) {
     }
 }
 
-async fn process_batch(batch: Vec<crate::Message>, client: &InferenceServiceClient) {
+async fn process_batch(batch: Vec<crate::Message>, client: Arc<InferenceServiceClient>) {
     let inputs: Vec<_> = batch
         .iter()
         // TODO: we can consider mem::take'ing here, but we
