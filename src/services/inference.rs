@@ -98,19 +98,25 @@ impl InferenceServiceWorker<crate::Message> {
                 res = self.chan.recv() => {
                     if let Some(msg) = res {
                         if self.queue.is_empty() {
+                            trace!("first message in new batch, setting timeout");
                             match (Utc::now() - msg.0).to_std() {
                                 Ok(elapsed) => {
+                                    trace!(elapsed_millis = elapsed.as_millis());
                                     self.timeout = Some(self.config.max_wait_time - elapsed);
                                 },
                                 // conversion to std::Duration errors if timedelta < 0
                                 Err(_) => {
+                                    trace!("message was backpressured for too long, setting timeout to ZERO");
                                     self.timeout = Some(Duration::ZERO);
                                 }
                             }
                         }
                         trace!(inputs = ?msg.1.inputs, "inference worker received embedding request");
                         self.queue.push(msg);
-                        if self.queue.len() < self.config.max_batch_size { continue; }
+                        if self.queue.len() < self.config.max_batch_size {
+                            trace!(queue_len = self.queue.len(), "batch not filled  just yet, continue collecting...");
+                            continue;
+                        }
                         trace!("max batch size reached, sending to inference service");
 
                         self.timeout.take();
@@ -119,7 +125,7 @@ impl InferenceServiceWorker<crate::Message> {
                     } else { break; }
                 },
                 _ = async {
-                        let timeout = self.timeout.take().expect("only polled by tokio if cond is true");
+                        let timeout = self.timeout.expect("only polled by tokio if cond is true");
                         tokio::time::sleep(timeout).await
                     }, if self.timeout.is_some() => {
                     trace!(
