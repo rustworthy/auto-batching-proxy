@@ -43,6 +43,10 @@ async fn embed(
     State(ctx): State<AppContext>,
     Json(embed_req): Json<EmbedRequest>,
 ) -> Result<Json<Vec<Embedding>>, Error> {
+    if embed_req.inputs.is_empty() {
+        return Err(Error::Unprocessable("inputs cannot be empty".into()));
+    }
+
     debug!(
         inputs = ?embed_req.inputs,
         "handler received embded request"
