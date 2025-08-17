@@ -48,7 +48,7 @@ dotenv:
 setup: dotenv tools/install inference/start
 
 # ------------------------- DEVELOPMENT COMMANDS -------------------------------
-PHONY: watch
+.PHONY: watch
 watch: inference/start
 	fuser -k ${APP_PORT}/tcp || true
 	cargo watch --clear --exec "run" --no-dot-ignores
@@ -64,13 +64,17 @@ check:
 	cargo doc --no-deps --all-features
 
 # ------------------------- TESTING COMMANDS -------------------------------
-.phony: load
+.PHONY: embed
+embed:
+	curl -X POST -d '{"inputs": $(inputs)}' -H 'Content-Type: application/json' http://localhost:${APP_PORT}/embed
+
+.PHONY: load
 load:
 	oha -c 200 -z $(duration) --latency-correction \
 		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \
 		http://localhost:${APP_PORT}/embed
 
-.phony: load/noproxy
+.PHONY: load/noproxy
 load/noproxy:
 	oha -c 200 -z $(duration) --latency-correction \
 		-m POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json' \

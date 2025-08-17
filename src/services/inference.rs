@@ -1,5 +1,5 @@
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use core::panic;
 use secrecy::SecretString;
 use std::{sync::Arc, time::Duration};
@@ -45,11 +45,37 @@ impl From<crate::Config> for ServiceWorkerConfig {
         }
     }
 }
+
+pub(crate) struct ReceivedMessage {
+    sent_at: DateTime<Utc>,
+    inputs_count: usize,
+    inputs: Option<Vec<String>>,
+    chan: crate::ResponseChannel,
+}
+
+impl From<crate::Message> for ReceivedMessage {
+    fn from(value: crate::Message) -> Self {
+        let (sent_at, req, chan) = value;
+        let inputs_count = req.inputs.len();
+        let inputs = if inputs_count > 0 {
+            Some(req.inputs)
+        } else {
+            None
+        };
+        Self {
+            sent_at,
+            inputs_count,
+            inputs,
+            chan,
+        }
+    }
+}
+
 pub(crate) struct InferenceServiceWorker<T> {
     client: Arc<InferenceServiceClient>,
     chan: mpsc::Receiver<T>,
     config: ServiceWorkerConfig,
-    queue: Vec<crate::Message>,
+    queue: Vec<ReceivedMessage>,
     timeout: Option<Duration>,
 }
 
@@ -95,11 +121,11 @@ impl InferenceServiceWorker<crate::Message> {
 
         loop {
             tokio::select! {
-                res = self.chan.recv() => {
+                res = async { self.chan.recv().await.map(ReceivedMessage::from) } => {
                     if let Some(msg) = res {
                         if self.queue.is_empty() {
                             trace!("first message in new batch, setting timeout");
-                            match (Utc::now() - msg.0).to_std() {
+                            match (Utc::now() - msg.sent_at).to_std() {
                                 Ok(elapsed) => {
                                     trace!(elapsed_millis = elapsed.as_millis());
                                     self.timeout = Some(self.config.max_wait_time - elapsed);
@@ -111,7 +137,7 @@ impl InferenceServiceWorker<crate::Message> {
                                 }
                             }
                         }
-                        trace!(inputs = ?msg.1.inputs, "inference worker received embedding request");
+                        trace!(inputs = ?msg.inputs, "inference worker received embedding request");
                         self.queue.push(msg);
                         if self.queue.len() < self.config.max_batch_size {
                             trace!(queue_len = self.queue.len(), "batch not filled  just yet, continue collecting...");
@@ -148,22 +174,20 @@ impl InferenceServiceWorker<crate::Message> {
     }
 }
 
-fn broadcast_error(e: anyhow::Error, batch: Vec<crate::Message>) {
+fn broadcast_error(e: anyhow::Error, batch: Vec<ReceivedMessage>) {
     let err = Arc::new(e);
-    for (_, _, chan) in batch {
-        if chan.send(Err(Arc::clone(&err))).is_err() {
+    for msg in batch {
+        if msg.chan.send(Err(Arc::clone(&err))).is_err() {
             error!("error sending response back to handler, channel closed");
         }
     }
 }
 
-async fn process_batch(batch: Vec<crate::Message>, client: Arc<InferenceServiceClient>) {
+async fn process_batch(mut batch: Vec<ReceivedMessage>, client: Arc<InferenceServiceClient>) {
     let inputs: Vec<_> = batch
-        .iter()
-        // TODO: we can consider mem::take'ing here, but we
-        // need to make sure there is a way to store the offset:
-        // to be able to link reqests and responses
-        .flat_map(|(_, req, _)| req.inputs.clone())
+        .iter_mut()
+        .flat_map(|msg| msg.inputs.take())
+        .flatten()
         .collect();
 
     let embeddings = match client.embed(inputs).await {
@@ -180,14 +204,14 @@ async fn process_batch(batch: Vec<crate::Message>, client: Arc<InferenceServiceC
 
     // TODO: what if the length of embeddings differs from inputs
     let mut offset = 0;
-    for (_, req, chan) in batch {
-        let limit = req.inputs.len();
+    for msg in batch {
+        let limit = msg.inputs_count;
         trace!(
             offset,
             limit, "projecting into embeddings to get repsonses for this handler"
         );
         let embeddings = &embeddings[offset..offset + limit];
-        if chan.send(Ok(embeddings.to_owned())).is_err() {
+        if msg.chan.send(Ok(embeddings.to_owned())).is_err() {
             error!("error sending embeddings back to handler, channel closed");
         }
         offset += limit;

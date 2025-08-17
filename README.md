@@ -1,18 +1,18 @@
 # Auto-batching proxy for inference requests
 
-## Task Description
+## Description
 
-The task was to create an auto-batching proxy service that would serve as a wrapper
+We've implemented an auto-batching proxy service that would serve as a wrapper
 over another inference service (see `Makefile` for details on how we are launching that
 service for development purposes). Internally, that batching proxy will 🥁 batch
 individual embedding requests, while for the end-user the API is the same, as if
 they were the only client of the inference service. This batching makes requests
 to the upstream service more efficient (and helps reduce costs).
 
-In my hometown in 1990-2000s, there used to be drivers hanging around the realway
+In our hometown in 1990-2000s, there used to be drivers hanging around the realway
 station who - if you missed your train or just did not bother to buy a ticket, would
 offer you a ride to another town - but a shared ride. They would gather (batch)
-a few fellas like myself and then start the ride. But there were rules - they
+a few fellas like ourselves and then start the ride. But there were rules - they
 could not take more that N people (depending on the vehicle size) and one person
 who came first could not wait for too long (like no longer than an hour normally).
 
@@ -44,6 +44,9 @@ the [upstream service][4] directly:
 ```console
 curl 127.0.0.1:8080/embed -X POST -d '{"inputs":["What is Vector Search?", "Hello, world!"]}' -H 'Content-Type: application/json'
 ```
+
+The endpoint is currently unprotected and we may want to revisit this and add
+API key athentication and throttling.
 
 ### Handler
 

@@ -5,10 +5,12 @@ use reqwest::StatusCode;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
+    #[error("unprecessable entity")]
+    Unprocessable(String),
+
     #[error("internal error occurred")]
     Anyhow(#[from] anyhow::Error),
 
-    // https://github.com/dtolnay/anyhow/issues/7#issuecomment-539383249
     #[error("internal error occurred")]
     AnyhowArced(#[from] Arc<anyhow::Error>),
 }
@@ -16,6 +18,10 @@ pub(crate) enum Error {
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         match self {
+            Error::Unprocessable(e) => {
+                trace!(error = %e, "unprocessable enitity");
+                return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response();
+            }
             Error::Anyhow(e) => {
                 error!(error = ?e, "unexpected error occurred");
             }

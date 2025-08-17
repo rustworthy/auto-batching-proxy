@@ -21,11 +21,9 @@ use tokio::sync::{mpsc, oneshot};
 
 pub use config::Config;
 
-pub(crate) type Message = (
-    DateTime<Utc>,
-    EmbedRequest,
-    oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>,
-);
+pub(crate) type ResponseChannel = oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>;
+
+pub(crate) type Message = (DateTime<Utc>, EmbedRequest, ResponseChannel);
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]
@@ -45,6 +43,10 @@ async fn embed(
     State(ctx): State<AppContext>,
     Json(embed_req): Json<EmbedRequest>,
 ) -> Result<Json<Vec<Embedding>>, Error> {
+    if embed_req.inputs.is_empty() {
+        return Err(Error::Unprocessable("inputs cannot be empty".into()));
+    }
+
     debug!(
         inputs = ?embed_req.inputs,
         "handler received embded request"
