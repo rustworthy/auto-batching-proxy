@@ -21,11 +21,9 @@ use tokio::sync::{mpsc, oneshot};
 
 pub use config::Config;
 
-pub(crate) type Message = (
-    DateTime<Utc>,
-    EmbedRequest,
-    oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>,
-);
+pub(crate) type ResponseChannel = oneshot::Sender<Result<Vec<Embedding>, Arc<anyhow::Error>>>;
+
+pub(crate) type Message = (DateTime<Utc>, EmbedRequest, ResponseChannel);
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(transparent)]

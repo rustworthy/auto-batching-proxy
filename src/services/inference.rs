@@ -1,5 +1,5 @@
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use core::panic;
 use secrecy::SecretString;
 use std::{sync::Arc, time::Duration};
@@ -45,6 +45,33 @@ impl From<crate::Config> for ServiceWorkerConfig {
         }
     }
 }
+
+#[allow(unused)]
+pub(crate) struct ReceivedMessage {
+    sent_at: DateTime<Utc>,
+    inputs_count: usize,
+    inputs: Option<Vec<String>>,
+    chan: crate::ResponseChannel,
+}
+
+impl From<crate::Message> for ReceivedMessage {
+    fn from(value: crate::Message) -> Self {
+        let (sent_at, req, chan) = value;
+        let inputs_count = req.inputs.len();
+        let inputs = if inputs_count > 0 {
+            Some(req.inputs)
+        } else {
+            None
+        };
+        Self {
+            sent_at,
+            inputs_count,
+            inputs,
+            chan,
+        }
+    }
+}
+
 pub(crate) struct InferenceServiceWorker<T> {
     client: Arc<InferenceServiceClient>,
     chan: mpsc::Receiver<T>,
