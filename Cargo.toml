@@ -7,25 +7,25 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 tracing = { version = "0.1", features = ["attributes"] }
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
-tokio = { version = "1.46.1", features = [
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
+tokio = { version = "1.49.0", features = [
   "macros",
   "net",
   "rt-multi-thread",
   "signal",
 ] }
-axum = { version = "0.8.6", features = ["macros"] }
+axum = { version = "0.8.8", features = ["macros"] }
 serde = { version = "1.0.219", features = ["derive"] }
 figment = { version = "0.10.19", features = ["env"] }
-anyhow = "1.0.100"
+anyhow = "1.0.102"
 dotenvy = "0.15.7" # only used in debug mode
 reqwest = { version = "0.12.23", default-features = false, features = [
   "rustls-tls",
   "json",
 ] }
 secrecy = { version = "0.10.3", features = ["serde"] }
-url = { version = "2.5.7", features = ["serde"] }
-thiserror = "2.0.17"
-chrono = "0.4.42"
+url = { version = "2.5.8", features = ["serde"] }
+thiserror = "2.0.18"
+chrono = "0.4.44"
 
 [dev-dependencies]
